@@ -1,8 +1,3 @@
-/**
- * we need a couple of patches and some utility functions
- * to the azure sdk, see
- *     https://github.com/teamdigitale/io-developer-portal-backend/tree/master/patches
- */
 // tslint:disable:no-console
 import * as dotenv from "dotenv";
 
@@ -17,7 +12,6 @@ import * as randomstring from "randomstring";
 import { Either, right } from "fp-ts/lib/Either";
 import { Option } from "fp-ts/lib/Option";
 import { UserContract } from "@azure/arm-apimanagement/esm/models";
-import { UserCreateParameters } from "@azure/graph/esm/models";
 import { ulid } from "ulid";
 
 dotenv.config();
@@ -230,35 +224,33 @@ async function init(): Promise<ReadonlyArray<void>> {
 
   const newAdb2cClient = new msGraph.GraphRbacManagementClient(
     newTokenCreds,
-    NEW_ADB2C_TENANT_ID
+    NEW_ADB2C_TENANT_ID,
+    { baseUri: "https://graph.windows.net" }
   );
 
   // const oldAdUser = await adb2cClient.users.get()
 
   // Create user into new ADB2C tenant and get the user's id
-  const newAdUser = await newAdb2cClient.users.create(({
+  const newAdUser = await newAdb2cClient.users.create({
     accountEnabled: true,
     creationType: "LocalAccount",
-    displayName: oldApimUser.firstName + " " + oldApimUser.lastName,
+    displayName: [oldApimUser.firstName, oldApimUser.lastName].join(" "),
     givenName: oldApimUser.firstName,
-    // mail: oldApimUser.email,
+    userPrincipalName: ulid() + "@" + NEW_ADB2C_TENANT_ID,
     mailNickname: oldApimUser.email.split("@")[0],
     passwordProfile: {
       forceChangePasswordNextLogin: true,
-      password: randomstring.generate({ length: 16 }) + "!"
+      password: randomstring.generate({ length: 32 })
     },
     signInNames: [
-      // controls which identifier the user uses to sign in to the account
       {
         type: "emailAddress",
         value: oldApimUser.email
       }
     ],
-    surname: oldApimUser.lastName,
-    // userPrincipalName: oldApimUser.email,
+    surname: [oldApimUser.firstName, oldApimUser.lastName].join(" "),
     userType: "Member"
-    // tslint:disable-next-line:no-any
-  } as any) as UserCreateParameters);
+  });
 
   // login into new api management
   const newCreds = await msRestAzure.loginWithServicePrincipalSecret(
@@ -284,14 +276,14 @@ async function init(): Promise<ReadonlyArray<void>> {
     oldApimUser.name,
     {
       email: oldApimUser.email,
-      firstName: oldApimUser.firstName!,
+      firstName: oldApimUser.firstName,
       identities: [
         {
           id: newAdUser.objectId,
           provider: "AadB2C"
         }
       ],
-      lastName: oldApimUser.lastName!
+      lastName: oldApimUser.lastName || oldApimUser.firstName
     }
   );
 
@@ -331,107 +323,6 @@ async function init(): Promise<ReadonlyArray<void>> {
   );
 }
 
-async function initv2(email: string) {
-  const oldCreds = await msRestAzure.loginWithServicePrincipalSecret(
-    OLD_ARM_CLIENT_ID,
-    OLD_ARM_CLIENT_SECRET,
-    OLD_ARM_TENANT_ID
-  );
-
-  const oldApiClient = new ApiManagementClient(
-    oldCreds,
-    OLD_ARM_SUBSCRIPTION_ID
-  );
-
-  const oldApimOpt = {
-    azurermApim: OLD_APIM_NAME,
-    azurermResourceGroup: OLD_APIM_RG
-  };
-
-  const maybeOldApimUser = await getApimUser(oldApiClient, email, oldApimOpt);
-  if (isNone(maybeOldApimUser)) {
-    throw new Error("no user found " + email);
-  }
-  const oldApimUser = maybeOldApimUser.value;
-
-  console.log(
-    "%s (%s)",
-    JSON.stringify(oldApimUser),
-    Array.from(oldApimUser.groupNames).join(",")
-  );
-
-  const authOpt: msRestAzure.AzureTokenCredentialsOptions = {
-    tokenAudience: "graph"
-  };
-
-  // login into new active directory b2c
-  const newTokenCreds = await msRestAzure.loginWithServicePrincipalSecret(
-    NEW_ADB2C_CLIENT_ID,
-    NEW_ADB2C_CLIENT_KEY,
-    NEW_ADB2C_TENANT_ID,
-    authOpt
-  );
-
-  const newAdb2cClient = new msGraph.GraphRbacManagementClient(
-    newTokenCreds,
-    NEW_ADB2C_TENANT_ID,
-    { baseUri: "https://graph.windows.net" }
-  );
-
-  // const oldAdUser = await adb2cClient.users.get()
-
-  // Create user into new ADB2C tenant and get the user's id
-  const newAdUser = await newAdb2cClient.users.create({
-    accountEnabled: true,
-    creationType: "LocalAccount",
-    displayName: [oldApimUser.firstName, oldApimUser.lastName].join(" "),
-    givenName: oldApimUser.firstName,
-    userPrincipalName: ulid() + "@" + NEW_ADB2C_TENANT_ID,
-    mailNickname: oldApimUser.email.split("@")[0],
-    passwordProfile: {
-      forceChangePasswordNextLogin: true,
-      password: randomstring.generate({ length: 16 }) + "!"
-    },
-    signInNames: [
-      {
-        type: "emailAddress",
-        value: oldApimUser.email
-      }
-    ],
-    surname: [oldApimUser.firstName, oldApimUser.lastName].join(" "),
-    userType: "Member"
-  });
-
-  const newCreds = await msRestAzure.loginWithServicePrincipalSecret(
-    NEW_ARM_CLIENT_ID,
-    NEW_ARM_CLIENT_SECRET,
-    NEW_ARM_TENANT_ID
-  );
-
-  const newApiClient = new ApiManagementClient(
-    newCreds,
-    NEW_ARM_SUBSCRIPTION_ID
-  );
-
-  // Create new user into new API management
-  await newApiClient.user.createOrUpdate(
-    NEW_APIM_RG,
-    NEW_APIM_NAME,
-    oldApimUser.name,
-    {
-      email: oldApimUser.email,
-      firstName: oldApimUser.firstName,
-      identities: [
-        {
-          id: newAdUser.objectId,
-          provider: "AadB2C"
-        }
-      ],
-      lastName: oldApimUser.lastName || oldApimUser.firstName
-    }
-  );
-}
-
-initv2("io-apim@teamdigitale.governo.it")
+init()
   .then(console.log)
   .catch(console.error);
