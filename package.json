@@ -6,7 +6,7 @@
   "dependencies": {
     "@azure/arm-apimanagement": "^5.1.1",
     "@azure/graph": "^4.0.1",
-    "@azure/ms-rest-nodeauth": "^2.0.5",
+    "@azure/ms-rest-nodeauth": "^3.0.8",
     "dotenv": "^8.2.0",
     "fp-ts": "^1.17.0",
     "io-ts": "^1.8.5",
